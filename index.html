@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard Tracking Pengiriman</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,Arial,sans-serif;background:#f6f7fb;color:#1f2937}
+    .wrap{max-width:1400px;margin:auto;padding:24px}.header{background:#fff;border-radius:18px;padding:24px;box-shadow:0 4px 18px #0000000d;margin-bottom:18px}
+    h1{margin:0 0 6px;font-size:28px}.sub{color:#6b7280}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+    .card{background:#fff;border-radius:16px;padding:18px;box-shadow:0 4px 18px #0000000d}.label{font-size:13px;color:#6b7280}.value{font-size:28px;font-weight:800;margin-top:8px}
+    .filters{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.filters input,.filters select{width:100%;padding:11px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}
+    .tablebox{margin-top:18px;background:#fff;border-radius:16px;padding:18px;overflow:auto;box-shadow:0 4px 18px #0000000d}
+    table{width:100%;border-collapse:collapse;min-width:950px}th,td{text-align:left;padding:12px;border-bottom:1px solid #eef0f3;font-size:13px}th{font-size:12px;color:#6b7280}
+    .pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700;background:#eef2ff}.muted{color:#9ca3af}
+    .status{margin-top:14px;padding:10px;border-radius:10px;background:#fff7ed;color:#9a3412;display:none}.ok{background:#ecfdf5;color:#047857}
+    .chart{display:grid;gap:10px;margin-top:14px}.barrow{display:grid;grid-template-columns:170px 1fr 45px;align-items:center;gap:8px;font-size:13px}.bar{height:12px;border-radius:8px;background:#e5e7eb;overflow:hidden}.fill{height:100%;background:#6366f1}
+    @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.filters{grid-template-columns:1fr 1fr}.wrap{padding:14px}}
+    @media(max-width:520px){.grid{grid-template-columns:1fr 1fr}.filters{grid-template-columns:1fr}.value{font-size:23px}h1{font-size:22px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>📦 Dashboard Tracking Pengiriman</h1>
+    <div class="sub">Monitoring status pengiriman secara online</div>
+    <div id="statusMsg" class="status"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Total Order</div><div class="value" id="total">0</div></div>
+    <div class="card"><div class="label">Selesai</div><div class="value" id="selesai">0</div></div>
+    <div class="card"><div class="label">Bermasalah / Tertunda</div><div class="value" id="tertunda">0</div></div>
+    <div class="card"><div class="label">Status Lainnya</div><div class="value" id="lainnya">0</div></div>
+  </div>
+
+  <div class="card">
+    <div class="filters">
+      <input id="search" placeholder="Cari no nota / pelanggan / kode...">
+      <select id="kecamatan"><option value="">Semua Kecamatan</option></select>
+      <select id="sales"><option value="">Semua Sales</option></select>
+      <select id="status"><option value="">Semua Status</option></select>
+      <input id="tgl" type="date" title="Tanggal Order">
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <b>Ringkasan Status</b>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="tablebox">
+    <b>Detail Status Pengiriman</b>
+    <table>
+      <thead><tr>
+        <th>No. Nota</th><th>Kode Pelanggan</th><th>Pelanggan</th><th>Tgl Order</th><th>Tgl Kirim</th>
+        <th>Kecamatan</th><th>Sales</th><th>Status</th><th>Keterangan</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="9" class="muted">Memuat data...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://mucmoowxmnxmphkcrdda.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_TWa9A9B_sGg8iT--wkhhOg_J1LNrAgS";
+const TABLE = "Tracking_Pengiriman";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+let rows = [];
+
+const $ = id => document.getElementById(id);
+const norm = v => (v ?? "").toString().trim();
+const esc = v => norm(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+
+async function loadData(){
+  const msg = $("statusMsg");
+  try{
+    const {data,error} = await sb.from(TABLE).select("*").order("tgl_order",{ascending:false});
+    if(error) throw error;
+    rows = data || [];
+    msg.style.display = "block"; msg.className = "status ok";
+    msg.textContent = "Data berhasil dimuat: " + rows.length + " order.";
+    populateFilters(); render();
+  }catch(e){
+    msg.style.display = "block"; msg.className = "status";
+    msg.textContent = "Gagal membaca data: " + (e.message || e);
+    $("tbody").innerHTML = '<tr><td colspan="9">Periksa Project URL, Publishable Key, nama tabel, dan RLS Supabase.</td></tr>';
+  }
+}
+function unique(field){return [...new Set(rows.map(r=>norm(r[field])).filter(Boolean))].sort();}
+function fillSelect(id, values){
+  const s=$(id), current=s.value;
+  const first=s.options[0].textContent;
+  s.innerHTML='<option value="">'+first+'</option>'+values.map(v=>'<option>'+esc(v)+'</option>').join('');
+  s.value=current;
+}
+function populateFilters(){
+  fillSelect("kecamatan",unique("kecamatan"));
+  fillSelect("sales",unique("sales_person"));
+  fillSelect("status",unique("status"));
+}
+function filtered(){
+  const q=norm($("search").value).toLowerCase(), k=$("kecamatan").value, s=$("sales").value, st=$("status").value, t=$("tgl").value;
+  return rows.filter(r=>{
+    const text=[r.no_nota,r.kode_pelanggan,r.pelanggan].map(norm).join(" ").toLowerCase();
+    return (!q||text.includes(q)) && (!k||r.kecamatan===k) && (!s||r.sales_person===s) && (!st||r.status===st) && (!t||r.tgl_order===t);
+  });
+}
+function render(){
+  const data=filtered();
+  $("total").textContent=data.length;
+  $("selesai").textContent=data.filter(r=>norm(r.status).toLowerCase()==="selesai").length;
+  $("tertunda").textContent=data.filter(r=>/bermasalah|tertunda/i.test(norm(r.status))).length;
+  $("lainnya").textContent=data.length - Number($("selesai").textContent) - Number($("tertunda").textContent);
+
+  const counts={}; data.forEach(r=>{const s=norm(r.status)||"Kosong"; counts[s]=(counts[s]||0)+1});
+  const max=Math.max(1,...Object.values(counts));
+  $("chart").innerHTML=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([s,n])=>
+    `<div class="barrow"><div>${esc(s)}</div><div class="bar"><div class="fill" style="width:${n/max*100}%"></div></div><b>${n}</b></div>`).join("") || '<span class="muted">Tidak ada data</span>';
+
+  $("tbody").innerHTML=data.map(r=>`<tr>
+    <td><b>${esc(r.no_nota)}</b></td><td>${esc(r.kode_pelanggan)}</td><td>${esc(r.pelanggan)}</td>
+    <td>${esc(r.tgl_order)}</td><td>${esc(r.tgl_kirim)}</td><td>${esc(r.kecamatan)}</td>
+    <td>${esc(r.sales_person)}</td><td><span class="pill">${esc(r.status)}</span></td><td>${esc(r.keterangan)}</td>
+  </tr>`).join("") || '<tr><td colspan="9" class="muted">Tidak ada data yang sesuai filter.</td></tr>';
+}
+["search","kecamatan","sales","status","tgl"].forEach(id=>$(id).addEventListener("input",render));
+loadData();
+</script>
+</body>
+</html>
